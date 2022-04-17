@@ -1,17 +1,23 @@
 package main
 
 import (
+	"crypto/sha256"
+	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/gookit/color"
 )
 
 type File struct {
 	name string
 	path string
 	info os.FileInfo
+	hash string ""
 }
 
 type UniqueFiles struct {
@@ -20,7 +26,7 @@ type UniqueFiles struct {
 	rawFiles []File
 }
 
-func getFilesFromArgs(args []string) []string {
+func getFilesFromArgs(args []string, showError bool) []string {
 	paths := []string{}
 
 	if len(args) == 0 {
@@ -30,12 +36,16 @@ func getFilesFromArgs(args []string) []string {
 			panic(err)
 		}
 		paths = []string{cwd}
-		fmt.Printf("No path specified, using current directory: %s\n", cwd)
+		if showError {
+			color.Warn.Tips("No path specified, using current directory: %s", cwd)
+		}
 	} else {
 		path := args
 		for _, path := range path {
 			if _, err := os.Stat(path); os.IsNotExist(err) {
-				fmt.Printf("Path %s does not exist\n", path)
+				if showError {
+					fmt.Printf("Path %s does not exist\n", path)
+				}
 				panic(err)
 			}
 		}
@@ -59,7 +69,7 @@ func getFilesInDirectory(path string) []File {
 				fmt.Println(err)
 				panic(err)
 			}
-			files = append(files, File{filepath.Base(pathWalk), pathWalk, info})
+			files = append(files, File{filepath.Base(pathWalk), pathWalk, info, ""})
 		}
 		return nil
 	})
@@ -70,12 +80,31 @@ func getFilesInDirectory(path string) []File {
 	return files
 }
 
+func remove(s []File, i int) []File {
+	s[i] = s[len(s)-1]
+	return s[:len(s)-1]
+}
+
 func main() {
+	noVerb := flag.Bool("no-verbose", false, "Don't display verbose output and colors")
+	strict := flag.Bool("strict", false, "Only display strict equals files")
+	flag.Parse()
+
+	if !*noVerb {
+		color.Warn.Tips("[!] Verbose mode enabled, to disable it specify add the option: -no-verbose")
+	} else {
+		color.Disable()
+	}
+
+	if *strict && !*noVerb {
+		color.Warn.Tips("[!] Strict mode enabled, to disable it specify remove the option: -strict")
+	}
+
 	// Define the global struct
 	prog := UniqueFiles{}
 
 	// Load the paths from the command line or set this up from the current directory
-	prog.path = getFilesFromArgs(os.Args[1:])
+	prog.path = getFilesFromArgs(flag.Args(), !*strict)
 	if len(prog.path) == 0 {
 		fmt.Println("No specified path")
 		panic("No specified path")
@@ -86,7 +115,9 @@ func main() {
 		prog.rawFiles = append(prog.rawFiles, getFilesInDirectory(path)...)
 	}
 
-	fmt.Println("Duplicated files:")
+	if !*noVerb {
+		fmt.Println("Duplicated files:")
+	}
 
 	// Unique entry in list
 	files := make(map[string][]File)
@@ -121,12 +152,65 @@ func main() {
 		})
 	}
 
-	for _, files := range prog.files {
-		if len(files) > 1 {
-			for _, file := range files {
-				fmt.Printf("%s (%db) - Modified on: %s\n", file.path, file.info.Size(), file.info.ModTime())
+	if *strict {
+		for filename, files := range prog.files {
+			if len(files) > 1 {
+				for i, file := range files {
+					hasher := sha256.New()
+					f, err := os.Open(file.path)
+					if err != nil {
+						fmt.Println(err)
+						panic(err)
+					}
+					defer f.Close()
+					if _, err := io.Copy(hasher, f); err != nil {
+						fmt.Println(err)
+						panic(err)
+					}
+					prog.files[filename][i].hash = fmt.Sprintf("%x", hasher.Sum(nil))
+				}
+
+				duplicateFiles := []File{}
+				for i, file := range files {
+					for j, file2 := range files {
+						if j > i && file.hash == file2.hash {
+							if len(duplicateFiles) == 0 {
+								duplicateFiles = append(duplicateFiles, file)
+							}
+							duplicateFiles = append(duplicateFiles, file2)
+						}
+					}
+				}
+				prog.files[filename] = duplicateFiles
+			}
+		}
+	}
+
+	totalFiles := 0
+	for filename, files := range prog.files {
+		lenFile := len(files)
+		totalFiles += lenFile
+		if lenFile > 1 {
+			if !*noVerb {
+				color.Bold.Println(filename, ":")
+			}
+			for index, file := range files {
+				incrSize := uint8(float64(index) / float64(lenFile-1) * 255)
+				s := color.RGB(incrSize, 255-incrSize, 0)
+				s.Print(file.path)
+				if !*noVerb {
+					s.Printf(" (%db) - Modified on: %s", file.info.Size(), file.info.ModTime())
+					if *strict {
+						s.Printf(" - Hash: %s", file.hash)
+					}
+				}
+				s.Println()
 			}
 			fmt.Println()
 		}
+	}
+
+	if !*noVerb {
+		color.Bold.Printf("Total files: %d (with %d uniques)\n", totalFiles, len(prog.files))
 	}
 }
