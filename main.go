@@ -187,17 +187,24 @@ func main() {
 	}
 
 	totalFiles := 0
+	totalDupFile := 0
 	for filename, files := range prog.files {
 		lenFile := len(files)
-		totalFiles += lenFile
 		if lenFile > 1 {
+			totalDupFile++
+			totalFiles += lenFile
+
 			if !*noVerb {
 				color.Bold.Println(filename, ":")
 			}
+
 			for index, file := range files {
+				// Calc color (from green to red)
 				incrSize := uint8(float64(index) / float64(lenFile-1) * 255)
 				s := color.RGB(incrSize, 255-incrSize, 0)
+
 				s.Print(file.path)
+
 				if !*noVerb {
 					s.Printf(" (%db) - Modified on: %s", file.info.Size(), file.info.ModTime())
 					if *strict {
@@ -211,6 +218,6 @@ func main() {
 	}
 
 	if !*noVerb {
-		color.Bold.Printf("Total files: %d (with %d uniques)\n", totalFiles, len(prog.files))
+		color.Bold.Printf("Total files: %d (with %d uniques)\n", totalFiles, totalDupFile)
 	}
 }
