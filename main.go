@@ -178,7 +178,7 @@ func main() {
 	} else {
 		var err error
 		// If the file doesn't exist, create it, or append to the file
-		f, err = os.OpenFile(*outputFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		f, err = os.OpenFile(*outputFilename, os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			panic(err)
@@ -282,7 +282,7 @@ func main() {
 	totalFiles := 0
 	totalDupFile := 0
 
-	if *outputFilename != "" {
+	if f != os.Stdout {
 		color.Disable()
 	}
 
@@ -314,6 +314,8 @@ func main() {
 			fmt.Fprintln(w, fmt.Sprint())
 		}
 	}
+
+	w.Flush()
 
 	if *outputFilename != "" {
 		color.ResetOptions()
